@@ -119,16 +119,10 @@ end
 if ~isfield(config, 'num_power_est_frames')
     config.num_power_est_frames = 20;
 end
-num_freq_regularizations = size(config.frequency_regularization, 2);
 
 % Spectrogram params
 win_samps = round(config.win_len * fs);
 shift_samps = round(config.win_shift * fs);
-num_sources = 2;  % two sources: speech and MRI scanner noise
-
-recon_error = zeros(config.maxiter, 1);
-frequency_regu_error = zeros(config.maxiter, 1);
-temporal_regu_error = zeros(config.maxiter, 1);
 
 % Randomly initialize speech dictionary
 w_speech = rand(config.nfft/2 + 1, config.num_speech_elems);
@@ -208,14 +202,10 @@ noise_est_opts = struct;
 noise_est_opts.H_init = exp(randn(config.num_noise_elems, num_noise_frames));
 noise_est_opts.maxiter = config.maxiter;
 [w_noise, h_noise] = nmf(abs(noise_spec), config.num_noise_elems, noise_est_opts);
-% w_noise = repmat(w_noise, 1, num_freq_regularizations);
-% h_noise = repmat(h_noise / num_freq_regularizations, num_freq_regularizations, 1);
 
 % Calculate noise statistics
 target_mean = mean(log(h_noise), 2);
 target_var = var(log(h_noise), [], 2);
-% target_mean_pos = 0.5 * diag(abs(target_mean) + target_mean);
-% target_mean_neg = 0.5 * diag(abs(target_mean) - target_mean);
 
 % Run CMF-WISA with additional regularization terms on the noisy signal
 noisy_opts = struct;
@@ -226,125 +216,6 @@ noisy_opts.W_regularization = {zeros(config.nfft/2 + 1, 1) config.frequency_regu
 noisy_opts.H_regularization = {zeros(1, 1); config.temporal_regularization};
 noisy_opts.maxiter = config.maxiter;
 [w_noisy, h_noisy, p_noisy, cost_noisy] = cmfwisa_regularized(noisy_spec, {config.num_speech_elems config.num_noise_elems}, {rand(config.nfft/2 + 1, config.num_speech_elems) w_noise}, {rand(config.num_speech_elems, size(noisy_spec, 2)); h_noise}, noisy_opts);
-
-% V = noisy_spec;
-% w_noisy = {w_speech w_noise};
-% h_noisy = {rand(config.num_speech_elems, n); [h_noise exp(diag(sqrt(target_var))*randn(num_freq_regularizations * config.num_noise_elems, n-num_noise_frames) + repmat(target_mean, 1, n-num_noise_frames))]};
-% W_all = cell2mat(w_noisy);
-% H_all = cell2mat(h_noisy);
-% 
-% p_noisy = cell(num_sources, 1);
-% V_hat_per_source = zeros(m, n, num_sources);
-% for i = 1 : num_sources
-%     p_noisy{i} = exp(1j * angle(V));
-%     V_hat_per_source(:, :, i) = ReconstructFromDecomposition(w_noisy{i}, h_noisy{i}) .* p_noisy{i};
-% end
-% 
-% beta = cell(num_sources, 1);
-% WH_hat = ReconstructFromDecomposition(W_all, H_all);
-% V_hat = sum(V_hat_per_source, 3);
-% 
-% V_bar_per_source = zeros(m, n, num_sources);
-% 
-% curr_mean = mean(log(h_noisy{2}), 2);
-% curr_var = var(log(h_noisy{2}), [], 2);
-% curr_mean_pos = 0.5 * diag(abs(curr_mean) + curr_mean);
-% curr_mean_neg = 0.5 * diag(abs(curr_mean) - curr_mean);
-% 
-% logH_pos = 0.5 * (abs(log(h_noisy{2})) + log(h_noisy{2}));
-% logH_neg = 0.5 * (abs(log(h_noisy{2})) - log(h_noisy{2}));
-% 
-% replication_idx = zeros(config.num_noise_elems, num_freq_regularizations);
-% freq_regu_mat = zeros(config.nfft/2 + 1, config.nfft/2 + 1, num_freq_regularizations);
-% for rep = 1 : num_freq_regularizations
-%     replication_idx(:, rep) = [(rep-1)*config.num_noise_elems + 1 : rep*config.num_noise_elems]';
-%     freq_regu_mat(:, :, rep) = diag(config.frequency_regularization(:, rep));
-% end
-% 
-% for iter = 1 : config.maxiter
-%     for i = 1 : num_sources
-%         % Update auxiliary variables
-%         beta{i} = ReconstructFromDecomposition(w_noisy{i}, h_noisy{i}) ./ WH_hat;
-%         V_bar_per_source(:, :, i) = V_hat_per_source(:, :, i) + beta{i} .* (V - V_hat);
-%     
-%         % Update phase matrices
-%         p_noisy{i} = exp(1j * angle(V_bar_per_source(:, :, i)));
-%         V_hat_per_source(:, :, i) = ReconstructFromDecomposition(w_noisy{i}, h_noisy{i}) .* p_noisy{i};
-%     end
-%     
-%     % Update basis matrices
-%     % Speech basis matrix
-%     W0 = w_noisy{1};
-%     for t = 1 : config.context_len
-%         H_shifted = [zeros(config.num_speech_elems, t-1) h_noisy{1}(:, 1:n-t+1)];
-%         w_noisy{1}(:, :, t) = W0(:, :, t) .* (((abs(V_bar_per_source(:, :, 1)) ./ beta{1}) * H_shifted') ./ max((ReconstructFromDecomposition(w_noisy{1}, h_noisy{1}) ./ beta{1}) * H_shifted', eps));
-%         w_noisy{1}(:, :, t) = w_noisy{1}(:, :, t) * diag(1 ./ sqrt(sum(w_noisy{1}(:, :, t).^2, 1)));
-%         WH_hat = max(WH_hat + (w_noisy{1}(:, :, t) - W0(:, :, t)) * H_shifted, 0);
-%     end
-%     V_hat_per_source(:, :, 1) = ReconstructFromDecomposition(w_noisy{1}, h_noisy{1}) .* p_noisy{1};
-%     % Noise basis matrix
-%     W0 = w_noisy{2};
-%     for t = 1 : config.context_len
-%         H_shifted = [zeros(num_freq_regularizations * config.num_noise_elems, t-1) h_noisy{2}(:, 1:n-t+1)];
-%         for rep = 1 : num_freq_regularizations
-%             w_noisy{2}(:, replication_idx(:, rep), t) = W0(:, replication_idx(:, rep), t) .* (((abs(V_bar_per_source(:, :, 2)) ./ beta{2}) * H_shifted(replication_idx(:, rep), :)' + freq_regu_mat(:, :, rep) * w_noise(:, replication_idx(:, rep), t)) ./ max((ReconstructFromDecomposition(w_noisy{2}, h_noisy{2}) ./ beta{2}) * H_shifted(replication_idx(:, rep), :)' + freq_regu_mat(:, :, rep) * W0(:, replication_idx(:, rep), t), eps));
-%         end
-%         w_noisy{2}(:, :, t) = w_noisy{2}(:, :, t) * diag(1 ./ sqrt(sum(w_noisy{2}(:, :, t).^2, 1)));
-%         WH_hat = max(WH_hat + (w_noisy{2}(:, :, t) - W0(:, :, t)) * H_shifted, 0);
-%     end
-%     V_hat_per_source(:, :, 2) = ReconstructFromDecomposition(w_noisy{2}, h_noisy{2}) .* p_noisy{2};
-% 
-%     W_all = cell2mat(w_noisy);
-% 
-%     % Update encoding matrices
-%     % Speech encoding matrix
-%     WH_neg = abs(V_bar_per_source(:, :, 1)) ./ beta{1};
-%     WH_pos = ReconstructFromDecomposition(w_noisy{1}, h_noisy{1}) ./ beta{1};
-%     gradient_neg = zeros(config.num_speech_elems, n);
-%     gradient_pos = zeros(config.num_speech_elems, n);
-%     for t = 1 : config.context_len
-%         WH_neg_shifted = [WH_neg(:, t:n) zeros(m, t-1)];
-%         WH_pos_shifted = [WH_pos(:, t:n) zeros(m, t-1)];
-%         gradient_neg = gradient_neg + w_noisy{1}(:, :, t)' * WH_neg_shifted;
-%         gradient_pos = gradient_pos + w_noisy{1}(:, :, t)' * WH_pos_shifted;
-%     end
-%     h_noisy{1} = h_noisy{1} .* (gradient_neg ./ max(gradient_pos + config.speech_sparsity, eps));
-%     V_hat_per_source(:, :, 1) = ReconstructFromDecomposition(w_noisy{1}, h_noisy{1}) .* p_noisy{1};
-%     % Noise encoding matrix
-%     WH_neg = abs(V_bar_per_source(:, :, 2)) ./ beta{2};
-%     WH_pos = ReconstructFromDecomposition(w_noisy{2}, h_noisy{2}) ./ beta{2};
-%     gradient_neg = zeros(num_freq_regularizations * config.num_noise_elems, n);
-%     gradient_pos = zeros(num_freq_regularizations * config.num_noise_elems, n);
-%     for t = 1 : config.context_len
-%         WH_neg_shifted = [WH_neg(:, t:n) zeros(m, t-1)];
-%         WH_pos_shifted = [WH_pos(:, t:n) zeros(m, t-1)];
-%         gradient_neg = gradient_neg + w_noisy{2}(:, :, t)' * WH_neg_shifted;
-%         gradient_pos = gradient_pos + w_noisy{2}(:, :, t)' * WH_pos_shifted;
-%     end
-%     h_noisy{2} = h_noisy{2} .* ((gradient_neg + config.temporal_regularization * ((1./h_noisy{2}) .* ((1/n) * diag(1 ./ curr_var) * (target_mean_pos + curr_mean_neg) * ones(num_freq_regularizations * config.num_noise_elems, n) + (1/(n-1)) * diag((target_var + (curr_mean - target_mean).^2) ./ curr_var.^2) * (logH_pos + curr_mean_neg * ones(num_freq_regularizations * config.num_noise_elems, n)) + (1/(n-1)) * diag(1 ./ curr_var) * (logH_neg + curr_mean_pos * ones(num_freq_regularizations * config.num_noise_elems, n))))) ./ ...
-%                              max(gradient_pos + config.temporal_regularization * ((1./h_noisy{2}) .* ((1/n) * diag(1 ./ curr_var) * (target_mean_neg + curr_mean_pos) * ones(num_freq_regularizations * config.num_noise_elems, n) + (1/(n-1)) * diag((target_var + (curr_mean - target_mean).^2) ./ curr_var.^2) * (logH_neg + curr_mean_pos * ones(num_freq_regularizations * config.num_noise_elems, n)) + (1/(n-1)) * diag(1 ./ curr_var) * (logH_pos + curr_mean_neg * ones(num_freq_regularizations * config.num_noise_elems, n)))), eps));
-%     h_noisy{2} = max(h_noisy{2}, eps);
-%     V_hat_per_source(:, :, 2) = ReconstructFromDecomposition(w_noisy{2}, h_noisy{2}) .* p_noisy{2};
-% 
-%     curr_mean = mean(log(h_noisy{2}), 2);
-%     curr_var = var(log(h_noisy{2}), [], 2);
-%     curr_mean_pos = 0.5 * diag(abs(curr_mean) + curr_mean);
-%     curr_mean_neg = 0.5 * diag(abs(curr_mean) - curr_mean);
-% 
-%     logH_pos = 0.5 * (abs(log(h_noisy{2})) + log(h_noisy{2}));
-%     logH_neg = 0.5 * (abs(log(h_noisy{2})) - log(h_noisy{2}));
-% 
-%     H_all = cell2mat(h_noisy);
-%     WH_hat = ReconstructFromDecomposition(W_all, H_all);
-%     V_hat = sum(V_hat_per_source, 3);
-% 
-%     recon_error(iter) = sum(sum(abs(V - V_hat).^2));
-%     for rep = 1 : num_freq_regularizations
-%         frequency_regu_error(iter) = frequency_regu_error(iter) + sum(sum(sum((freq_regu_mat(:, :, rep) * (w_noise(:, replication_idx(:, rep), :) - w_noisy{2}(:, replication_idx(:, rep), :))).^2, 1), 2), 3);
-%     end
-%     temporal_regu_error(iter) = 0.5 * (trace(diag(curr_var) \ diag(target_var)) + ((curr_mean - target_mean)' / diag(curr_var)) * (curr_mean - target_mean) - num_freq_regularizations * config.num_noise_elems + sum(log(curr_var)) - sum(log(target_var))); %log(det(diag(curr_var)) / det(diag(target_var))));
-% end
-% cost_noisy = recon_error + frequency_regu_error + config.temporal_regularization * temporal_regu_error;
 
 % Reconstruct the estimated speech and noise
 speech_spec_sirmax = ReconstructFromDecomposition(w_noisy{1}, h_noisy{1}) .* p_noisy{1};
