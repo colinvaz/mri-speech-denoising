@@ -18,8 +18,8 @@ config.frequency_regularization = [1e7*ones(30, 1)                     1e7*ones(
 denoised_speech = MRIdenoising(noisy_speech, 0, fs, config);
 
 % Plot noisy and denoised spectrograms
-figure, spectrogram(noisy_speech, config.win_len * fs, (config.win_len - config.win_shift) * fs, config.nfft, fs, 'yaxis');
-figure, spectrogram(denoised_speech, config.win_len * fs, (config.win_len - config.win_shift) * fs, config.nfft, fs, 'yaxis');
+figure, spectrogram(noisy_speech, round(config.win_len * fs), round((config.win_len - config.win_shift) * fs), config.nfft, fs, 'yaxis');
+figure, spectrogram(denoised_speech, round(config.win_len * fs), round((config.win_len - config.win_shift) * fs), config.nfft, fs, 'yaxis');
 
 % Listen to denoised speech
 %soundsc(denoised_speech, fs);
