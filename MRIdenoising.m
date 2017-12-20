@@ -4,8 +4,6 @@ function [speech_hat, noise_hat, cost_noisy] = MRIdenoising(noisy_sig, noise_est
 % factorization with intra-source additivity (CMF-WISA) and additional
 % frequency and temporal regularization terms.
 %
-% Dependency: Requires NMF Toolbox: https://github.com/colinvaz/nmf-toolbox
-%
 % Inputs:
 %   noisy_sig: [vector]
 %       noisy speech
